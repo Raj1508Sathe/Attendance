@@ -5,7 +5,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import time
-from streamlit_autorefresh import st_autorefresh # Make sure this is installed
+from streamlit_autorefresh import st_autorefresh 
 
 # ----------------------------------------
 # PAGE CONFIGURATION
@@ -35,7 +35,6 @@ st.markdown("""
         border: 1px solid rgba(255, 255, 255, 0.1);
         margin-bottom: 20px;
     }
-    /* Floating Chatbot Box Fix */
     .floating-chatbot {
         position: fixed;
         bottom: 80px;
@@ -52,7 +51,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ----------------------------------------
-# SESSION MANAGEMENT FOR LOGIN
+# SESSION MANAGEMENT
 # ----------------------------------------
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
@@ -65,13 +64,13 @@ if not st.session_state.authenticated:
     if st.button("Login"):
         if username == "Raj" and pin == "RAJ1508":
             st.session_state.authenticated = True
-            st.rerun() # FIXED: experimental_rerun removed
+            st.rerun()
         else:
             st.error("Invalid credentials. Try again.")
     st.stop()
 
 # ----------------------------------------
-# DATA LOADING FROM GOOGLE SHEETS
+# DATA LOADING
 # ----------------------------------------
 @st.cache_data(ttl=60)
 def load_data():
@@ -81,8 +80,8 @@ def load_data():
         client = gspread.authorize(creds)
         sheet = client.open("Student_Attendance_System").get_worksheet(1)
         return pd.DataFrame(sheet.get_all_records())
-    except Exception as e:
-        # Demo fallback data
+    except:
+        # Emergency Demo Data
         return pd.DataFrame({
             "Name": ["Atharva", "Shravani", "Janhavi", "Vaishnavi", "Anushka", "Aditi", "Raj", "Om", "Jaydip"],
             "Status": ["Present", "Absent", "Present", "Present", "Absent", "Present", "Present", "Present", "Present"],
@@ -90,16 +89,11 @@ def load_data():
             "Timestamp": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")] * 9
         })
 
-# ----------------------------------------
-# AUTO REFRESH (CLEANED UP)
-# ----------------------------------------
-st_autorefresh(interval=10000, key="datarefresh") # Simple 10s refresh
-
-# LOAD THE DATA
+st_autorefresh(interval=10000, key="datarefresh")
 data = load_data()
 
 # ----------------------------------------
-# SIDEBAR NAVIGATION
+# SIDEBAR
 # ----------------------------------------
 with st.sidebar:
     st.markdown(f"### 🛡 Admin: {st.session_state.get('username', 'Raj')}")
@@ -115,12 +109,12 @@ with st.sidebar:
 # ----------------------------------------
 st.markdown(f"<h1 style='text-align:center; color:#00ffff;'>Computer Engineering Command Center</h1>", unsafe_allow_html=True)
 
-# Friends Monitoring Hub
+# Monitoring Hub (Friends word removed)
 st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-st.subheader("👥 Friends Monitoring Hub")
+st.subheader("👥 Student Monitoring Hub")
 
-friends = ["Atharva", "Shravani", "Janhavi", "Vaishnavi", "Anushka", "Aditi", "Raj", "Om", "Jaydip"]
-df_monitor = data[data["Name"].isin(friends)]
+student_list = ["Atharva", "Shravani", "Janhavi", "Vaishnavi", "Anushka", "Aditi", "Raj", "Om", "Jaydip"]
+df_monitor = data[data["Name"].isin(student_list)]
 
 if not df_monitor.empty:
     summary = df_monitor.groupby("Name").agg({"Status": "last", "Scan_Count": "sum"}).reset_index()
@@ -133,15 +127,15 @@ st.markdown("</div>", unsafe_allow_html=True)
 st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
 col1, col2, col3 = st.columns(3)
 total_logs = len(data)
-active_friends = df_monitor[df_monitor["Status"] == "Present"].shape[0]
-iot_health = "🟢 Optimal" if active_friends > 4 else "🟡 Moderate"
+active_count = df_monitor[df_monitor["Status"] == "Present"].shape[0]
+iot_health = "🟢 Optimal" if active_count > 4 else "🟡 Moderate"
 
 col1.metric("📊 Total Logs", total_logs)
-col2.metric("👥 Active Friends", active_friends)
+col2.metric("👥 Active Students", active_count)
 col3.metric("🤖 IoT Health", iot_health)
 st.markdown("</div>", unsafe_allow_html=True)
 
-# Plotly Area Chart
+# Area Chart
 st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
 chart_data = data.copy()
 chart_data["Timestamp"] = pd.to_datetime(chart_data["Timestamp"], errors="coerce")
@@ -153,7 +147,7 @@ st.plotly_chart(fig, width='stretch')
 st.markdown("</div>", unsafe_allow_html=True)
 
 # ----------------------------------------
-# SIDEBAR TOGGLE BEHAVIOR
+# SIDEBAR NAVIGATION LOGIC
 # ----------------------------------------
 if view == "📝 Students Record":
     st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
@@ -165,7 +159,7 @@ elif view == "📍 College Location":
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ----------------------------------------
-# FLOATING AI CHATBOT (BOTTOM RIGHT)
+# FLOATING AI CHATBOT (Friends word removed)
 # ----------------------------------------
 query = st.chat_input("Ask your AI Assistant about attendance or location...")
 if query:
@@ -175,7 +169,7 @@ if query:
     if "location" in query_lower or "college" in query_lower:
         response = "📍 JSPM NTC is in Narhe, Pune (18.4485, 73.8275). It's a premier institute for Engineering."
     else:
-        for name in friends:
+        for name in student_list:
             if name.lower() in query_lower:
                 record = df_monitor[df_monitor["Name"].str.contains(name, case=False, na=False)]
                 if not record.empty:
@@ -187,9 +181,8 @@ if query:
                 break
 
     if response == "":
-        response = "🤖 Sorry, I can answer only about Narhe campus or your friends' attendance."
+        response = "🤖 Sorry, I can answer only about Narhe campus or student attendance."
     
-    # Render Floating Message
     st.markdown(f"""
         <div class='floating-chatbot'>
             <b style='color:#00ffff;'>🤖 AI Assistant:</b><br>
