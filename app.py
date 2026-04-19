@@ -17,7 +17,7 @@ st.set_page_config(
 )
 
 # ----------------------------------------
-# CSS — minimal, no complex HTML blocks
+# CSS — plain string, NO f-prefix (fixes vw SyntaxError)
 # ----------------------------------------
 st.markdown("""
 <style>
@@ -35,6 +35,468 @@ html, body, .stApp {
 
 [data-testid="stSidebar"] {
     background: rgba(6,182,212,0.04) !important;
+    border-right: 1px solid rgba(6,182,212,0.15) !important;
+}
+[data-testid="stSidebar"] * { color: #cbd5e1 !important; }
+
+[data-testid="metric-container"] {
+    background: rgba(6,182,212,0.06) !important;
+    border: 1px solid rgba(6,182,212,0.2) !important;
+    border-radius: 16px !important;
+    padding: 1rem 1.2rem !important;
+}
+[data-testid="stMetricValue"] {
+    font-family: 'Orbitron', sans-serif !important;
+    font-size: 2rem !important;
+    color: #06b6d4 !important;
+}
+[data-testid="stMetricLabel"] {
+    font-size: 0.7rem !important;
+    letter-spacing: 1.5px !important;
+    color: #64748b !important;
+    text-transform: uppercase !important;
+}
+
+.stButton > button {
+    background: rgba(6,182,212,0.08) !important;
+    border: 1px solid rgba(6,182,212,0.3) !important;
+    border-radius: 10px !important;
+    color: #06b6d4 !important;
+    font-family: 'Rajdhani', sans-serif !important;
+    font-size: 0.85rem !important;
+    letter-spacing: 1px !important;
+    transition: all 0.2s !important;
+}
+.stButton > button:hover {
+    background: rgba(6,182,212,0.18) !important;
+    border-color: #06b6d4 !important;
+}
+
+div[data-testid="stTextInput"] input {
+    background: rgba(6,182,212,0.05) !important;
+    border: 1px solid rgba(6,182,212,0.2) !important;
+    border-radius: 10px !important;
+    color: #e2e8f0 !important;
+    font-family: 'Rajdhani', sans-serif !important;
+}
+
+[data-testid="stDataFrame"] {
+    border: 1px solid rgba(6,182,212,0.15) !important;
+    border-radius: 12px !important;
+}
+
+.stRadio label { color: #94a3b8 !important; }
+hr { border-color: rgba(6,182,212,0.15) !important; }
+
+.stTabs [data-baseweb="tab-list"] {
+    background: rgba(6,182,212,0.04) !important;
+    border-radius: 12px !important;
+    gap: 4px !important;
+}
+.stTabs [data-baseweb="tab"] {
+    color: #64748b !important;
+    font-family: 'Orbitron', sans-serif !important;
+    font-size: 0.65rem !important;
+    letter-spacing: 1.5px !important;
+    border-radius: 10px !important;
+}
+.stTabs [aria-selected="true"] {
+    background: rgba(6,182,212,0.15) !important;
+    color: #06b6d4 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ----------------------------------------
+# SESSION STATE
+# ----------------------------------------
+for key, val in [("authenticated", False), ("chat_history", []), ("students", None)]:
+    if key not in st.session_state:
+        st.session_state[key] = val
+
+# ----------------------------------------
+# LOGIN
+# ----------------------------------------
+if not st.session_state.authenticated:
+    st.markdown("""
+        <h1 style='font-family:Orbitron,sans-serif;font-size:1.6rem;font-weight:900;
+                   background:linear-gradient(135deg,#06b6d4,#8b5cf6);
+                   -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+                   text-align:center;letter-spacing:3px;margin-top:4rem;'>
+            ⬡ SMART ATTEND
+        </h1>
+        <p style='text-align:center;color:#475569;font-size:0.8rem;
+                  letter-spacing:2px;margin-bottom:2rem;'>
+            JSPM NTC · COMPUTER ENGINEERING
+        </p>
+    """, unsafe_allow_html=True)
+    _, c, _ = st.columns([1, 1, 1])
+    with c:
+        username = st.text_input("Username", placeholder="Enter username")
+        pin      = st.text_input("PIN", type="password", placeholder="Enter PIN")
+        if st.button("ENTER SYSTEM", use_container_width=True):
+            if username == "Raj" and pin == "RAJ1508":
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("Invalid credentials. Try again.")
+    st.stop()
+
+# ----------------------------------------
+# DATA LOADING
+# ----------------------------------------
+@st.cache_data(ttl=60)
+def load_data():
+    try:
+        scope  = ["https://spreadsheets.google.com/feeds",
+                  "https://www.googleapis.com/auth/drive"]
+        creds  = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+        client = gspread.authorize(creds)
+        sheet  = client.open("Student_Attendance_System").get_worksheet(1)
+        return pd.DataFrame(sheet.get_all_records())
+    except Exception:
+        return pd.DataFrame({
+            "Name":       ["Atharva","Shravani","Janhavi","Vaishnavi",
+                           "Anushka","Aditi","Raj","Om","Jaydip"],
+            "Status":     ["Present","Absent","Present","Present",
+                           "Absent","Present","Present","Present","Present"],
+            "Scan_Count": [5, 2, 6, 7, 3, 5, 4, 1, 6],
+            "Timestamp":  [datetime.now().strftime("%Y-%m-%d %H:%M:%S")] * 9,
+        })
+
+if st.session_state.students is None:
+    st.session_state.students = load_data().copy()
+
+data         = st.session_state.students
+STUDENT_LIST = ["Atharva","Shravani","Janhavi","Vaishnavi",
+                "Anushka","Aditi","Raj","Om","Jaydip"]
+df           = data[data["Name"].isin(STUDENT_LIST)].copy()
+
+st_autorefresh(interval=30000, key="autorefresh")
+
+# ----------------------------------------
+# SIDEBAR
+# ----------------------------------------
+with st.sidebar:
+    st.markdown("""
+        <div style='text-align:center;padding:0.8rem 0;'>
+            <span style='font-family:Orbitron,sans-serif;font-size:1rem;font-weight:900;
+                         background:linear-gradient(135deg,#06b6d4,#8b5cf6);
+                         -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+                         letter-spacing:2px;'>⬡ SMART ATTEND</span>
+        </div>
+    """, unsafe_allow_html=True)
+    st.caption(f"🟢 ADMIN: RAJ  ·  {datetime.now().strftime('%d %b %Y  %H:%M')}")
+    st.divider()
+    if st.button("🔁  Reload Data", use_container_width=True):
+        st.cache_data.clear()
+        st.session_state.students = None
+        st.rerun()
+    st.download_button(
+        "📤  Export CSV",
+        data=df.to_csv(index=False),
+        file_name=f"attendance_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+    st.divider()
+    if st.button("🚪  Logout", use_container_width=True):
+        st.session_state.authenticated = False
+        st.session_state.students = None
+        st.rerun()
+
+# ----------------------------------------
+# HEADER
+# ----------------------------------------
+st.markdown("""
+    <h1 style='font-family:Orbitron,sans-serif;font-size:1.3rem;font-weight:900;
+               background:linear-gradient(135deg,#06b6d4,#8b5cf6);
+               -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+               text-align:center;letter-spacing:3px;margin-bottom:0.1rem;'>
+        ⬡ COMPUTER ENGINEERING COMMAND CENTER
+    </h1>
+    <p style='text-align:center;color:#334155;font-size:0.72rem;
+              letter-spacing:2px;margin-bottom:1.2rem;'>
+        SMART ATTENDANCE · JSPM NTC · NARHE, PUNE
+    </p>
+""", unsafe_allow_html=True)
+
+# ----------------------------------------
+# COMPUTED STATS
+# ----------------------------------------
+present_n = int((df["Status"] == "Present").sum())
+absent_n  = int((df["Status"] == "Absent").sum())
+total_n   = len(df)
+rate_n    = round(present_n / total_n * 100) if total_n else 0
+
+# ----------------------------------------
+# HELPER: donut chart
+# ----------------------------------------
+def make_donut(value, total, color, label):
+    fig = go.Figure(go.Pie(
+        values=[value, max(total - value, 0)],
+        hole=0.72,
+        marker_colors=[color, "rgba(255,255,255,0.04)"],
+        textinfo="none",
+        showlegend=False,
+        hoverinfo="skip",
+    ))
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        margin=dict(t=8, b=8, l=8, r=8),
+        height=150,
+        annotations=[dict(
+            text=f"<b>{value}</b>",
+            x=0.5, y=0.5,
+            font=dict(size=24, color=color, family="Orbitron"),
+            showarrow=False,
+        )],
+    )
+    return fig
+
+# ----------------------------------------
+# TABS
+# ----------------------------------------
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📊 Overview", "👥 Records", "📈 Analytics", "🤖 AI Assistant", "📍 Location"
+])
+
+# ══════════════════════════════════════════
+# TAB 1 — OVERVIEW
+# ══════════════════════════════════════════
+with tab1:
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("TOTAL STUDENTS",  total_n)
+    k2.metric("PRESENT",         present_n)
+    k3.metric("ABSENT",          absent_n)
+    k4.metric("ATTENDANCE RATE", f"{rate_n}%")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Donut rings
+    r1, r2, r3 = st.columns(3)
+    with r1:
+        st.plotly_chart(make_donut(present_n, total_n, "#06b6d4", "Present"),
+                        use_container_width=True, key="d1")
+        st.markdown("<p style='text-align:center;font-size:0.7rem;letter-spacing:2px;"
+                    "color:#475569;'>PRESENT</p>", unsafe_allow_html=True)
+    with r2:
+        st.plotly_chart(make_donut(absent_n, total_n, "#f87171", "Absent"),
+                        use_container_width=True, key="d2")
+        st.markdown("<p style='text-align:center;font-size:0.7rem;letter-spacing:2px;"
+                    "color:#475569;'>ABSENT</p>", unsafe_allow_html=True)
+    with r3:
+        st.plotly_chart(make_donut(rate_n, 100, "#10b981", "Rate"),
+                        use_container_width=True, key="d3")
+        st.markdown("<p style='text-align:center;font-size:0.7rem;letter-spacing:2px;"
+                    "color:#475569;'>RATE %</p>", unsafe_allow_html=True)
+
+    # Absent alerts
+    absent_names = df[df["Status"] == "Absent"]["Name"].tolist()
+    if absent_names:
+        st.divider()
+        st.markdown("**⚠ Absence Alerts**")
+        acols = st.columns(len(absent_names))
+        for i, name in enumerate(absent_names):
+            acols[i].warning(f"⚠ {name}")
+
+    st.divider()
+
+    # Scan bar chart
+    st.markdown("<p style='font-family:Orbitron,sans-serif;font-size:0.7rem;"
+                "letter-spacing:2px;color:#06b6d4;'>SCAN ACTIVITY · TODAY</p>",
+                unsafe_allow_html=True)
+    bar_colors = ["#06b6d4" if s == "Present" else "#f87171" for s in df["Status"]]
+    fig_bar = go.Figure(go.Bar(
+        x=df["Name"], y=df["Scan_Count"],
+        marker_color=bar_colors, marker_line_width=0,
+        text=df["Scan_Count"], textposition="outside",
+        textfont=dict(color="#94a3b8"),
+    ))
+    fig_bar.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#64748b", family="Rajdhani"),
+        margin=dict(t=20, b=10, l=10, r=10),
+        xaxis=dict(gridcolor="rgba(255,255,255,0.04)"),
+        yaxis=dict(gridcolor="rgba(255,255,255,0.07)"),
+        height=240, bargap=0.4,
+    )
+    st.plotly_chart(fig_bar, use_container_width=True, key="bar")
+
+# ══════════════════════════════════════════
+# TAB 2 — RECORDS
+# ══════════════════════════════════════════
+with tab2:
+    st.markdown("<p style='font-family:Orbitron,sans-serif;font-size:0.7rem;"
+                "letter-spacing:2px;color:#06b6d4;'>STUDENT MONITORING HUB</p>",
+                unsafe_allow_html=True)
+
+    search   = st.text_input("Search", placeholder="Type student name...", label_visibility="collapsed")
+    filtered = df[df["Name"].str.contains(search, case=False)] if search else df
+
+    display_df = filtered[["Name","Status","Scan_Count","Timestamp"]].copy()
+    display_df.columns = ["Name","Status","Scans","Last Seen"]
+
+    st.dataframe(
+        display_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Scans": st.column_config.ProgressColumn(
+                "Scan Count",
+                min_value=0,
+                max_value=int(df["Scan_Count"].max()) if not df.empty else 10,
+                format="%d",
+            ),
+        },
+    )
+
+    st.divider()
+    st.markdown("<p style='font-family:Orbitron,sans-serif;font-size:0.7rem;"
+                "letter-spacing:2px;color:#06b6d4;'>MARK ATTENDANCE</p>",
+                unsafe_allow_html=True)
+
+    rows = [STUDENT_LIST[i:i+3] for i in range(0, len(STUDENT_LIST), 3)]
+    for row in rows:
+        cols = st.columns(3)
+        for i, name in enumerate(row):
+            match   = st.session_state.students["Name"] == name
+            current = st.session_state.students.loc[match, "Status"].values
+            if len(current):
+                status = current[0]
+                icon   = "✅" if status == "Present" else "❌"
+                if cols[i].button(f"{icon} {name} ({status})",
+                                  key=f"tog_{name}", use_container_width=True):
+                    st.session_state.students.loc[match, "Status"] = (
+                        "Absent" if status == "Present" else "Present"
+                    )
+                    st.rerun()
+
+# ══════════════════════════════════════════
+# TAB 3 — ANALYTICS
+# ══════════════════════════════════════════
+with tab3:
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.markdown("<p style='font-family:Orbitron,sans-serif;font-size:0.7rem;"
+                    "letter-spacing:2px;color:#06b6d4;'>WEEKLY TREND</p>",
+                    unsafe_allow_html=True)
+        days          = ["Mon","Tue","Wed","Thu","Fri","Sat","Today"]
+        present_trend = [8, 7, 9, 6, 8, 7, present_n]
+        absent_trend  = [1, 2, 0, 3, 1, 2, absent_n]
+        fig_t = go.Figure()
+        fig_t.add_trace(go.Scatter(
+            x=days, y=present_trend, name="Present",
+            line=dict(color="#06b6d4", width=2),
+            fill="tozeroy", fillcolor="rgba(6,182,212,0.08)",
+            mode="lines+markers", marker=dict(size=6, color="#06b6d4"),
+        ))
+        fig_t.add_trace(go.Scatter(
+            x=days, y=absent_trend, name="Absent",
+            line=dict(color="#f87171", width=2, dash="dot"),
+            fill="tozeroy", fillcolor="rgba(248,113,113,0.06)",
+            mode="lines+markers", marker=dict(size=6, color="#f87171"),
+        ))
+        fig_t.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#64748b", family="Rajdhani"),
+            legend=dict(orientation="h", y=1.15, x=0, font=dict(color="#94a3b8")),
+            margin=dict(t=30, b=10, l=10, r=10), height=240,
+            xaxis=dict(gridcolor="rgba(255,255,255,0.04)"),
+            yaxis=dict(gridcolor="rgba(255,255,255,0.07)", range=[0, 10]),
+        )
+        st.plotly_chart(fig_t, use_container_width=True, key="trend")
+
+    with c2:
+        st.markdown("<p style='font-family:Orbitron,sans-serif;font-size:0.7rem;"
+                    "letter-spacing:2px;color:#06b6d4;'>DISTRIBUTION</p>",
+                    unsafe_allow_html=True)
+        fig_p = go.Figure(go.Pie(
+            labels=["Present","Absent"],
+            values=[present_n, absent_n],
+            hole=0.70,
+            marker=dict(
+                colors=["rgba(6,182,212,0.75)","rgba(248,113,113,0.75)"],
+                line=dict(color=["#06b6d4","#f87171"], width=2),
+            ),
+            textinfo="label+percent",
+            textfont=dict(color="#94a3b8", family="Rajdhani"),
+        ))
+        fig_p.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#64748b"), showlegend=False,
+            margin=dict(t=10, b=10, l=10, r=10), height=240,
+        )
+        st.plotly_chart(fig_p, use_container_width=True, key="pie")
+
+    st.markdown("<p style='font-family:Orbitron,sans-serif;font-size:0.7rem;"
+                "letter-spacing:2px;color:#06b6d4;margin-top:0.5rem;'>SCAN LEADERBOARD</p>",
+                unsafe_allow_html=True)
+    top_df  = df.sort_values("Scan_Count", ascending=True)
+    fig_top = go.Figure(go.Bar(
+        x=top_df["Scan_Count"], y=top_df["Name"],
+        orientation="h",
+        marker=dict(
+            color=top_df["Scan_Count"],
+            colorscale=[[0,"rgba(139,92,246,0.5)"],[1,"rgba(6,182,212,0.9)"]],
+            line_width=0,
+        ),
+        text=top_df["Scan_Count"], textposition="outside",
+        textfont=dict(color="#94a3b8"),
+    ))
+    fig_top.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#64748b", family="Rajdhani"),
+        margin=dict(t=10, b=10, l=10, r=10), height=280,
+        xaxis=dict(gridcolor="rgba(255,255,255,0.04)"),
+        yaxis=dict(gridcolor="rgba(0,0,0,0)"),
+    )
+    st.plotly_chart(fig_top, use_container_width=True, key="lead")
+
+# ══════════════════════════════════════════
+# TAB 4 — AI ASSISTANT
+# ══════════════════════════════════════════
+with tab4:
+    def ai_response(q, frame):
+        ql = q.lower()
+        if any(w in ql for w in ["location","college","campus","where"]):
+            return "📍 JSPM NTC is in Narhe, Pune — 18.4485°N, 73.8275°E."
+        if "who" in ql and "absent" in ql:
+            names = frame[frame["Status"]=="Absent"]["Name"].tolist()
+            return f"Currently absent: {', '.join(names)}." if names else "Nobody is absent! 🎉"
+        if "who" in ql and "present" in ql:
+            names = frame[frame["Status"]=="Present"]["Name"].tolist()
+            return f"Currently present: {', '.join(names)}."
+        if any(w in ql for w in ["rate","percentage","%"]):
+            pct = round((frame["Status"]=="Present").sum() / len(frame) * 100)
+            return f"Today's attendance rate is {pct}%."
+        if any(w in ql for w in ["top","highest","most"]) and "scan" in ql:
+            top = frame.sort_values("Scan_Count", ascending=False).iloc[0]
+            return f"Highest scans: {top['Name']} with {int(top['Scan_Count'])} scans."
+        if any(w in ql for w in ["summary","report","overview"]):
+            p = (frame["Status"]=="Present").sum()
+            a = (frame["Status"]=="Absent").sum()
+            return f"Summary → Present: {p} | Absent: {a} | Rate: {round(p/len(frame)*100)}%"
+        for name in frame["Name"].tolist():
+            if name.lower() in ql:
+                row = frame[frame["Name"].str.lower()==name.lower()].iloc[0]
+                return f"{row['Name']} is {row['Status']} with {int(row['Scan_Count'])} scans today."
+        return "Ask me: 'Who is absent?', 'Attendance rate?', a student name, or 'Give me a summary'."
+
+    st.markdown("<p style='font-family:Orbitron,sans-serif;font-size:0.7rem;"
+                "letter-spacing:2px;color:#06b6d4;'>AI ATTENDANCE ASSISTANT</p>",
+                unsafe_allow_html=True)
+
+    # Quick prompts
+    qp_list = ["Who is absent?","Who is present?","Attendance rate?",
+               "Top scanner?","Give me a summary","College location?"]
+    qc = st.columns(3)
+    for i, qp in enumerate(qp_list):
+        if qc[i % 3].button(qp, key=f"qp_{i}", use_container_width=True):
+            st.session_state.chat_history.append({"role":"user","text":qp})
+            st.session_state.chat_history.append({"role":"ai","text":ai_response(qp,df)})
+            st.reru    background: rgba(6,182,212,0.04) !important;
     border-right: 1px solid rgba(6,182,212,0.15) !important;
 }
 [data-testid="stSidebar"] * { color: #cbd5e1 !important; }
