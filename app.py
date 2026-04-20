@@ -1,285 +1,456 @@
-import streamlit as st
-import pandas as pd
-import plotly.graph_objects as go
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
-from streamlit_autorefresh import st_autorefresh
+"""
+╔══════════════════════════════════════════════════════════════════════╗
+║         JSPM NTC - Smart Attendance Portal                          ║
+║         Built with Streamlit + Firebase Realtime Database           ║
+╚══════════════════════════════════════════════════════════════════════╝
 
-# ----------------------------------------
-# PAGE CONFIG
-# ----------------------------------------
+SETUP INSTRUCTIONS:
+1. Install dependencies:
+       pip install streamlit firebase-admin pandas
+
+2. Place your Firebase service account JSON file in the same folder.
+   Rename it  →  serviceAccountKey.json
+   (Or change SERVICE_ACCOUNT_PATH below to match your filename.)
+
+3. Run the app:
+       streamlit run smart_attendance_dashboard.py
+"""
+
+# ─────────────────────────────────────────────
+#  IMPORTS
+# ─────────────────────────────────────────────
+import streamlit as st
+import firebase_admin
+from firebase_admin import credentials, db
+import pandas as pd
+from datetime import datetime, date
+import io
+
+# ─────────────────────────────────────────────
+#  ① PASTE YOUR FIREBASE CREDENTIALS HERE
+# ─────────────────────────────────────────────
+
+# Path to your downloaded service-account JSON file.
+SERVICE_ACCOUNT_PATH = "serviceAccountKey.json"
+
+# Your Firebase Realtime Database URL — looks like:
+#   https://<your-project-id>-default-rtdb.firebaseio.com/
+FIREBASE_DATABASE_URL = "https://YOUR-PROJECT-ID-default-rtdb.firebaseio.com/"
+
+# ─────────────────────────────────────────────
+#  ② UID → STUDENT NAME MAPPING
+#  Add as many entries as you need.
+#  Format:  "UID from RFID card" : "Student Full Name"
+# ─────────────────────────────────────────────
+UID_TO_NAME = {
+    "A1 B2 C3 D4": "Raj Sathe",
+    "11 22 33 44": "Priya Deshmukh",
+    "AA BB CC DD": "Arjun Kulkarni",
+    "12 34 56 78": "Sneha Patil",
+    "DE AD BE EF": "Rohan Mehta",
+    # ← keep adding more entries here
+}
+
+# ─────────────────────────────────────────────
+#  PAGE CONFIG  (must be first Streamlit call)
+# ─────────────────────────────────────────────
 st.set_page_config(
-    page_title="Smart Attendance System",
-    page_icon="⬡",
+    page_title="JSPM NTC – Smart Attendance",
+    page_icon="🎓",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-# ----------------------------------------
-# CSS — plain string, NO f-prefix (fixes vw SyntaxError)
-# ----------------------------------------
-st.markdown("""
+# ─────────────────────────────────────────────
+#  DARK-MODE CSS STYLING
+# ─────────────────────────────────────────────
+DARK_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600&display=swap');
+/* ── Google Font Import ── */
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@300;400;500&display=swap');
 
-[data-testid="stStatusWidget"],
-[data-testid="stToolbar"],
-footer { display: none !important; }
-
-html, body, .stApp {
-    background: radial-gradient(circle at 20% 20%, #0c1a2e, #020617 60%) !important;
-    color: #e2e8f0 !important;
-    font-family: 'Rajdhani', sans-serif !important;
+/* ── Global Dark Background ── */
+html, body, [data-testid="stAppViewContainer"],
+[data-testid="stHeader"], [data-testid="stToolbar"] {
+    background-color: #0d1117 !important;
+    color: #e6edf3 !important;
 }
 
+/* ── Sidebar ── */
 [data-testid="stSidebar"] {
-    background: rgba(6,182,212,0.04) !important;
-    border-right: 1px solid rgba(6,182,212,0.15) !important;
-}
-[data-testid="stSidebar"] * { color: #cbd5e1 !important; }
-
-[data-testid="metric-container"] {
-    background: rgba(6,182,212,0.06) !important;
-    border: 1px solid rgba(6,182,212,0.2) !important;
-    border-radius: 16px !important;
-    padding: 1rem 1.2rem !important;
-}
-[data-testid="stMetricValue"] {
-    font-family: 'Orbitron', sans-serif !important;
-    font-size: 2rem !important;
-    color: #06b6d4 !important;
-}
-[data-testid="stMetricLabel"] {
-    font-size: 0.7rem !important;
-    letter-spacing: 1.5px !important;
-    color: #64748b !important;
-    text-transform: uppercase !important;
+    background: linear-gradient(180deg, #161b22 0%, #0d1117 100%) !important;
+    border-right: 1px solid #30363d;
 }
 
-.stButton > button {
-    background: rgba(6,182,212,0.08) !important;
-    border: 1px solid rgba(6,182,212,0.3) !important;
-    border-radius: 10px !important;
-    color: #06b6d4 !important;
-    font-family: 'Rajdhani', sans-serif !important;
-    font-size: 0.85rem !important;
-    letter-spacing: 1px !important;
-    transition: all 0.2s !important;
-}
-.stButton > button:hover {
-    background: rgba(6,182,212,0.18) !important;
-    border-color: #06b6d4 !important;
+/* ── Main title ── */
+.portal-title {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 2.4rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    background: linear-gradient(90deg, #58a6ff, #79c0ff, #56d364);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 0;
 }
 
-div[data-testid="stTextInput"] input {
-    background: rgba(6,182,212,0.05) !important;
-    border: 1px solid rgba(6,182,212,0.2) !important;
-    border-radius: 10px !important;
-    color: #e2e8f0 !important;
-    font-family: 'Rajdhani', sans-serif !important;
+.portal-subtitle {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 300;
+    color: #8b949e;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-top: 2px;
 }
 
+/* ── KPI Cards ── */
+.kpi-card {
+    background: linear-gradient(135deg, #161b22 0%, #1c2128 100%);
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 24px 28px;
+    text-align: center;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.kpi-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 32px rgba(88,166,255,0.15);
+    border-color: #58a6ff;
+}
+.kpi-value {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 3.2rem;
+    font-weight: 700;
+    color: #58a6ff;
+    line-height: 1;
+}
+.kpi-label {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.78rem;
+    font-weight: 500;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #8b949e;
+    margin-top: 8px;
+}
+.kpi-icon { font-size: 1.6rem; margin-bottom: 8px; }
+
+/* ── Section Headers ── */
+.section-header {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 1.1rem;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #8b949e;
+    border-bottom: 1px solid #21262d;
+    padding-bottom: 8px;
+    margin: 24px 0 12px 0;
+}
+
+/* ── Status badge: online ── */
+.status-online {
+    display: inline-block;
+    width: 8px; height: 8px;
+    background: #56d364;
+    border-radius: 50%;
+    margin-right: 6px;
+    box-shadow: 0 0 6px #56d364;
+    animation: pulse 2s infinite;
+}
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.4; }
+}
+
+/* ── Streamlit dataframe ── */
 [data-testid="stDataFrame"] {
-    border: 1px solid rgba(6,182,212,0.15) !important;
-    border-radius: 12px !important;
+    border: 1px solid #21262d;
+    border-radius: 8px;
+    overflow: hidden;
 }
 
-.stRadio label { color: #94a3b8 !important; }
-hr { border-color: rgba(6,182,212,0.15) !important; }
+/* ── Streamlit buttons ── */
+.stButton > button {
+    background: linear-gradient(135deg, #238636, #2ea043) !important;
+    color: #ffffff !important;
+    border: none !important;
+    border-radius: 6px !important;
+    font-family: 'Inter', sans-serif !important;
+    font-weight: 500 !important;
+    padding: 8px 20px !important;
+    transition: opacity 0.2s !important;
+}
+.stButton > button:hover { opacity: 0.85 !important; }
 
-.stTabs [data-baseweb="tab-list"] {
-    background: rgba(6,182,212,0.04) !important;
-    border-radius: 12px !important;
-    gap: 4px !important;
+/* ── Search box ── */
+[data-testid="stTextInput"] > div > input {
+    background: #161b22 !important;
+    color: #e6edf3 !important;
+    border: 1px solid #30363d !important;
+    border-radius: 6px !important;
 }
-.stTabs [data-baseweb="tab"] {
-    color: #64748b !important;
-    font-family: 'Orbitron', sans-serif !important;
-    font-size: 0.65rem !important;
-    letter-spacing: 1.5px !important;
-    border-radius: 10px !important;
-}
-.stTabs [aria-selected="true"] {
-    background: rgba(6,182,212,0.15) !important;
-    color: #06b6d4 !important;
-}
+
+/* ── Divider ── */
+hr { border-color: #21262d !important; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #0d1117; }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
 </style>
+"""
+st.markdown(DARK_CSS, unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────────
+#  FIREBASE INITIALISATION  (cached per session)
+# ─────────────────────────────────────────────
+@st.cache_resource(show_spinner=False)
+def init_firebase():
+    """Initialise the Firebase Admin SDK once per Streamlit session."""
+    if not firebase_admin._apps:
+        # ↓↓↓  Your service-account key and DB URL are used here  ↓↓↓
+        cred = credentials.Certificate(SERVICE_ACCOUNT_PATH)
+        firebase_admin.initialize_app(cred, {"databaseURL": FIREBASE_DATABASE_URL})
+    return db.reference("/logs")
+
+
+# ─────────────────────────────────────────────
+#  DATA FETCHING
+# ─────────────────────────────────────────────
+def fetch_logs(logs_ref) -> pd.DataFrame:
+    """Pull all records from /logs, resolve names, return a DataFrame."""
+    raw = logs_ref.get()
+
+    if not raw:
+        return pd.DataFrame(columns=["Timestamp", "UID", "Student Name", "Date", "Time"])
+
+    rows = []
+    for key, entry in raw.items():
+        uid       = entry.get("uid", "N/A")
+        timestamp = entry.get("timestamp", "N/A")
+        name      = UID_TO_NAME.get(uid, "Unknown Guest")
+        rows.append({"_key": key, "UID": uid, "Student Name": name, "Timestamp": timestamp})
+
+    df = pd.DataFrame(rows)
+
+    # Parse timestamps (try ISO 8601 first; adjust format string if needed)
+    df["_dt"] = pd.to_datetime(df["Timestamp"], errors="coerce")
+    df = df.sort_values("_dt", ascending=False)
+
+    # Split into human-friendly Date / Time columns
+    df["Date"] = df["_dt"].dt.strftime("%d %b %Y").fillna("—")
+    df["Time"] = df["_dt"].dt.strftime("%I:%M:%S %p").fillna("—")
+
+    return df[["Timestamp", "UID", "Student Name", "Date", "Time"]]
+
+
+def compute_kpis(df: pd.DataFrame) -> tuple[int, int]:
+    """Return (total_scans_today, unique_students_today)."""
+    today_str = date.today().strftime("%d %b %Y")
+    today_df  = df[df["Date"] == today_str]
+    total_today   = len(today_df)
+    unique_today  = today_df["UID"].nunique()
+    return total_today, unique_today
+
+
+# ─────────────────────────────────────────────
+#  SIDEBAR
+# ─────────────────────────────────────────────
+with st.sidebar:
+    # ── Logo placeholder ──
+    st.markdown("""
+    <div style="text-align:center; padding: 20px 0 10px 0;">
+        <div style="
+            width: 80px; height: 80px; margin: 0 auto;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #1f6feb, #388bfd);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 2rem; box-shadow: 0 0 20px rgba(56,139,253,0.4);">
+            🎓
+        </div>
+        <div style="font-family:'Rajdhani',sans-serif; font-size:1.1rem;
+                    font-weight:700; color:#e6edf3; margin-top:10px;
+                    letter-spacing:1px;">JSPM NTC</div>
+        <div style="font-family:'Inter',sans-serif; font-size:0.7rem;
+                    color:#8b949e; letter-spacing:2px;">ATTENDANCE PORTAL</div>
+    </div>
+    <hr/>
+    """, unsafe_allow_html=True)
+
+    st.markdown("### ⚙️ Controls")
+
+    # ── Refresh button ──
+    refresh = st.button("🔄  Refresh Data", use_container_width=True)
+
+    st.markdown("<br/>", unsafe_allow_html=True)
+    st.markdown("### 📅 Filter by Date")
+    date_filter = st.date_input("Select date", value=date.today())
+
+    st.markdown("<br/>", unsafe_allow_html=True)
+    st.markdown("### 📥 Export")
+
+    # CSV download rendered after data is loaded (see below)
+    csv_placeholder = st.empty()
+
+    st.markdown("<hr/>", unsafe_allow_html=True)
+    st.markdown("""
+    <div style='font-family:Inter,sans-serif; font-size:0.72rem; color:#484f58;
+                text-align:center; line-height:1.6;'>
+        NodeMCU ESP8266 + RFID RC522<br/>
+        Firebase Realtime Database<br/>
+        <span class='status-online'></span> Live Connection
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────────
+#  HEADER
+# ─────────────────────────────────────────────
+st.markdown("""
+<div>
+    <div class='portal-title'>JSPM NTC – Smart Attendance Portal</div>
+    <div class='portal-subtitle'>IoT-powered RFID Attendance Tracking System</div>
+</div>
 """, unsafe_allow_html=True)
 
-# ----------------------------------------
-# SESSION STATE
-# ----------------------------------------
-for key, val in [("authenticated", False), ("chat_history", []), ("students", None)]:
-    if key not in st.session_state:
-        st.session_state[key] = val
+st.markdown("<br/>", unsafe_allow_html=True)
 
-# ----------------------------------------
-# LOGIN
-# ----------------------------------------
-if not st.session_state.authenticated:
-    st.markdown("""
-        <h1 style='font-family:Orbitron,sans-serif;font-size:1.6rem;font-weight:900;
-                   background:linear-gradient(135deg,#06b6d4,#8b5cf6);
-                   -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-                   text-align:center;letter-spacing:3px;margin-top:4rem;'>
-            ⬡ SMART ATTEND
-        </h1>
-        <p style='text-align:center;color:#475569;font-size:0.8rem;
-                  letter-spacing:2px;margin-bottom:2rem;'>
-            JSPM NTC · COMPUTER ENGINEERING
-        </p>
-    """, unsafe_allow_html=True)
-    _, c, _ = st.columns([1, 1, 1])
-    with c:
-        username = st.text_input("Username", placeholder="Enter username")
-        pin      = st.text_input("PIN", type="password", placeholder="Enter PIN")
-        if st.button("ENTER SYSTEM", use_container_width=True):
-            if username == "Raj" and pin == "RAJ1508":
-                st.session_state.authenticated = True
-                st.rerun()
-            else:
-                st.error("Invalid credentials. Try again.")
-    st.stop()
 
-# ----------------------------------------
-# DATA LOADING
-# ----------------------------------------
-@st.cache_data(ttl=60)
-def load_data():
+# ─────────────────────────────────────────────
+#  LOAD DATA
+# ─────────────────────────────────────────────
+with st.spinner("Connecting to Firebase…"):
     try:
-        scope  = ["https://spreadsheets.google.com/feeds",
-                  "https://www.googleapis.com/auth/drive"]
-        creds  = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
-        client = gspread.authorize(creds)
-        sheet  = client.open("Student_Attendance_System").get_worksheet(1)
-        return pd.DataFrame(sheet.get_all_records())
-    except Exception:
-        return pd.DataFrame({
-            "Name":       ["Atharva","Shravani","Janhavi","Vaishnavi",
-                           "Anushka","Aditi","Raj","Om","Jaydip"],
-            "Status":     ["Present","Absent","Present","Present",
-                           "Absent","Present","Present","Present","Present"],
-            "Scan_Count": [5, 2, 6, 7, 3, 5, 4, 1, 6],
-            "Timestamp":  [datetime.now().strftime("%Y-%m-%d %H:%M:%S")] * 9,
-        })
+        logs_ref = init_firebase()
+        df_all   = fetch_logs(logs_ref)
+        connected = True
+    except Exception as e:
+        st.error(f"❌ Firebase connection failed: {e}")
+        st.info("💡 Check SERVICE_ACCOUNT_PATH and FIREBASE_DATABASE_URL at the top of the script.")
+        df_all    = pd.DataFrame(columns=["Timestamp", "UID", "Student Name", "Date", "Time"])
+        connected = False
 
-if st.session_state.students is None:
-    st.session_state.students = load_data().copy()
+# Re-fetch on manual refresh click
+if refresh and connected:
+    st.cache_resource.clear()
+    st.rerun()
 
-data         = st.session_state.students
-STUDENT_LIST = ["Atharva","Shravani","Janhavi","Vaishnavi",
-                "Anushka","Aditi","Raj","Om","Jaydip"]
-df           = data[data["Name"].isin(STUDENT_LIST)].copy()
 
-st_autorefresh(interval=30000, key="autorefresh")
+# ─────────────────────────────────────────────
+#  KPI CARDS
+# ─────────────────────────────────────────────
+total_today, unique_today = compute_kpis(df_all)
+total_all   = len(df_all)
+unique_all  = df_all["UID"].nunique() if not df_all.empty else 0
 
-# ----------------------------------------
-# SIDEBAR
-# ----------------------------------------
-with st.sidebar:
-    st.markdown("""
-        <div style='text-align:center;padding:0.8rem 0;'>
-            <span style='font-family:Orbitron,sans-serif;font-size:1rem;font-weight:900;
-                         background:linear-gradient(135deg,#06b6d4,#8b5cf6);
-                         -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-                         letter-spacing:2px;'>⬡ SMART ATTEND</span>
+col1, col2, col3, col4 = st.columns(4)
+
+kpi_data = [
+    (col1, "📡", str(total_today),  "Total Scans Today"),
+    (col2, "🎓", str(unique_today), "Unique Students Today"),
+    (col3, "📊", str(total_all),    "All-Time Total Scans"),
+    (col4, "👥", str(unique_all),   "All-Time Unique UIDs"),
+]
+
+for col, icon, value, label in kpi_data:
+    with col:
+        st.markdown(f"""
+        <div class='kpi-card'>
+            <div class='kpi-icon'>{icon}</div>
+            <div class='kpi-value'>{value}</div>
+            <div class='kpi-label'>{label}</div>
         </div>
-    """, unsafe_allow_html=True)
-    st.caption(f"🟢 ADMIN: RAJ  ·  {datetime.now().strftime('%d %b %Y  %H:%M')}")
-    st.divider()
-    if st.button("🔁  Reload Data", use_container_width=True):
-        st.cache_data.clear()
-        st.session_state.students = None
-        st.rerun()
-    st.download_button(
-        "📤  Export CSV",
-        data=df.to_csv(index=False),
-        file_name=f"attendance_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+        """, unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────────
+#  ATTENDANCE TABLE
+# ─────────────────────────────────────────────
+st.markdown("<div class='section-header'>📋 Attendance Log</div>", unsafe_allow_html=True)
+
+# ── Date filter ──
+filter_str = date_filter.strftime("%d %b %Y")
+df_filtered = df_all[df_all["Date"] == filter_str].copy() if not df_all.empty else df_all.copy()
+
+# ── Search box ──
+search_col, info_col = st.columns([3, 1])
+with search_col:
+    search = st.text_input("🔍 Search by name or UID", placeholder="e.g. Raj Sathe or A1 B2 C3 D4")
+with info_col:
+    st.markdown("<br/>", unsafe_allow_html=True)
+    if not df_filtered.empty:
+        st.markdown(
+            f"<div style='font-family:Inter,sans-serif; font-size:0.8rem; color:#8b949e;"
+            f"padding-top:6px;'>Showing <b style='color:#e6edf3'>{len(df_filtered)}</b> records for {filter_str}</div>",
+            unsafe_allow_html=True,
+        )
+
+if search:
+    mask = (
+        df_filtered["Student Name"].str.contains(search, case=False, na=False) |
+        df_filtered["UID"].str.contains(search, case=False, na=False)
+    )
+    df_filtered = df_filtered[mask]
+
+# ── Display table ──
+if df_filtered.empty:
+    st.info("ℹ️ No records found for the selected date / search term.")
+else:
+    st.dataframe(
+        df_filtered[["Date", "Time", "Student Name", "UID"]],
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Date":         st.column_config.TextColumn("📅 Date",   width="medium"),
+            "Time":         st.column_config.TextColumn("🕐 Time",   width="medium"),
+            "Student Name": st.column_config.TextColumn("🎓 Student", width="large"),
+            "UID":          st.column_config.TextColumn("🔖 UID",    width="medium"),
+        },
+    )
+
+
+# ─────────────────────────────────────────────
+#  CSV EXPORT  (injected into sidebar)
+# ─────────────────────────────────────────────
+if not df_all.empty:
+    csv_bytes = df_all[["Date", "Time", "Student Name", "UID", "Timestamp"]].to_csv(index=False).encode("utf-8")
+    csv_placeholder.download_button(
+        label="⬇️  Download Full CSV",
+        data=csv_bytes,
+        file_name=f"attendance_{date.today().strftime('%Y-%m-%d')}.csv",
         mime="text/csv",
         use_container_width=True,
     )
-    st.divider()
-    if st.button("🚪  Logout", use_container_width=True):
-        st.session_state.authenticated = False
-        st.session_state.students = None
-        st.rerun()
+else:
+    csv_placeholder.caption("No data to export yet.")
 
-# ----------------------------------------
-# HEADER
-# ----------------------------------------
-st.markdown("""
-    <h1 style='font-family:Orbitron,sans-serif;font-size:1.3rem;font-weight:900;
-               background:linear-gradient(135deg,#06b6d4,#8b5cf6);
-               -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-               text-align:center;letter-spacing:3px;margin-bottom:0.1rem;'>
-        ⬡ COMPUTER ENGINEERING COMMAND CENTER
-    </h1>
-    <p style='text-align:center;color:#334155;font-size:0.72rem;
-              letter-spacing:2px;margin-bottom:1.2rem;'>
-        SMART ATTENDANCE · JSPM NTC · NARHE, PUNE
-    </p>
+
+# ─────────────────────────────────────────────
+#  RECENT SCANS  (last 5)
+# ─────────────────────────────────────────────
+if not df_all.empty:
+    st.markdown("<div class='section-header'>⚡ Recent Scans</div>", unsafe_allow_html=True)
+    recent = df_all.head(5)[["Date", "Time", "Student Name", "UID"]]
+    st.dataframe(recent, use_container_width=True, hide_index=True)
+
+
+# ─────────────────────────────────────────────
+#  FOOTER
+# ─────────────────────────────────────────────
+st.markdown("<br/><hr/>", unsafe_allow_html=True)
+st.markdown(f"""
+<div style='font-family:Inter,sans-serif; font-size:0.72rem; color:#484f58;
+            text-align:center; padding:8px 0;'>
+    JSPM NTC Smart Attendance Portal &nbsp;|&nbsp;
+    NodeMCU ESP8266 + RFID RC522 &nbsp;|&nbsp;
+    Last refreshed: {datetime.now().strftime("%d %b %Y, %I:%M %p")}
+</div>
 """, unsafe_allow_html=True)
-
-# ----------------------------------------
-# COMPUTED STATS
-# ----------------------------------------
-present_n = int((df["Status"] == "Present").sum())
-absent_n  = int((df["Status"] == "Absent").sum())
-total_n   = len(df)
-rate_n    = round(present_n / total_n * 100) if total_n else 0
-
-# ----------------------------------------
-# HELPER: donut chart
-# ----------------------------------------
-def make_donut(value, total, color, label):
-    fig = go.Figure(go.Pie(
-        values=[value, max(total - value, 0)],
-        hole=0.72,
-        marker_colors=[color, "rgba(255,255,255,0.04)"],
-        textinfo="none",
-        showlegend=False,
-        hoverinfo="skip",
-    ))
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        margin=dict(t=8, b=8, l=8, r=8),
-        height=150,
-        annotations=[dict(
-            text=f"<b>{value}</b>",
-            x=0.5, y=0.5,
-            font=dict(size=24, color=color, family="Orbitron"),
-            showarrow=False,
-        )],
-    )
-    return fig
-
-# ----------------------------------------
-# TABS
-# ----------------------------------------
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📊 Overview", "👥 Records", "📈 Analytics", "🤖 AI Assistant", "📍 Location"
-])
-
-# ══════════════════════════════════════════
-# TAB 1 — OVERVIEW
-# ══════════════════════════════════════════
-with tab1:
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("TOTAL STUDENTS",  total_n)
-    k2.metric("PRESENT",         present_n)
-    k3.metric("ABSENT",          absent_n)
-    k4.metric("ATTENDANCE RATE", f"{rate_n}%")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Donut rings
-    r1, r2, r3 = st.columns(3)
-    with r1:
-        st.plotly_chart(make_donut(present_n, total_n, "#06b6d4", "Present"),
-                        use_container_width=True, key="d1")
-        st.markdown("<p style='text-align:center;font-size:0.7rem;letter-spacing:2px;"
-                    "color:#475569;'>PRESENT</p>", unsafe_allow_html=True)
+RESENT</p>", unsafe_allow_html=True)
     with r2:
         st.plotly_chart(make_donut(absent_n, total_n, "#f87171", "Absent"),
                         use_container_width=True, key="d2")
