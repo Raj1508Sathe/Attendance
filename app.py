@@ -1,297 +1,194 @@
-# =============================================================================
-#  JSPM NTC - Smart Attendance Portal
-#  Built with Streamlit + Firebase Realtime Database
-# =============================================================================
-#
-#  SETUP INSTRUCTIONS:
-#  1. Install dependencies:
-#         pip install streamlit firebase-admin pandas
-#
-#  2. Place your Firebase service account JSON in the same folder as this file.
-#     Default expected name: serviceAccountKey.json
-#
-#  3. Fill in SERVICE_ACCOUNT_PATH and FIREBASE_DATABASE_URL below.
-#
-#  4. Run:
-#         streamlit run smart_attendance_dashboard.py
-# =============================================================================
-
-# ── Imports ──────────────────────────────────────────────────────────────────
 import streamlit as st
-import firebase_admin
-from firebase_admin import credentials, db
 import pandas as pd
-from datetime import datetime, date
-from typing import Tuple
+import plotly.express as px
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+from datetime import datetime
+import time
+from streamlit_autorefresh import st_autorefresh 
 
-
-# =============================================================================
-#  SECTION 1 ── CONFIGURATION  (edit these two values)
-# =============================================================================
-
-# Path to your Firebase service-account JSON key file
-SERVICE_ACCOUNT_PATH = "serviceAccountKey.json"
-
-# Your Firebase Realtime Database URL
-# Example: "https://my-project-default-rtdb.firebaseio.com/"
-FIREBASE_DATABASE_URL = "https://YOUR-PROJECT-ID-default-rtdb.firebaseio.com/"
-
-
-# =============================================================================
-#  SECTION 2 ── UID-TO-NAME MAPPING  (add your students here)
-# =============================================================================
-
-UID_TO_NAME = {
-    "A1 B2 C3 D4": "Raj Sathe",
-    "11 22 33 44": "Priya Deshmukh",
-    "AA BB CC DD": "Arjun Kulkarni",
-    "12 34 56 78": "Sneha Patil",
-    "DE AD BE EF": "Rohan Mehta",
-    # Add more entries below:
-    # "XX XX XX XX": "Student Name",
-}
-
-
-# =============================================================================
-#  PAGE CONFIG  — must be the very first Streamlit call
-# =============================================================================
-
+# ----------------------------------------
+# PAGE CONFIGURATION
+# ----------------------------------------
 st.set_page_config(
-    page_title="JSPM NTC - Smart Attendance",
-    page_icon="🎓",
+    page_title="Smart Attendance System",
+    page_icon="🧠",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="expanded"
 )
 
+# ----------------------------------------
+# CUSTOM UI: CYBERPUNK DARK THEME + GLASSMORPHISM
+# ----------------------------------------
+st.markdown("""
+    <style>
+    [data-testid="stStatusWidget"] {display: none !important;}
+    .stApp {
+        background: radial-gradient(circle at top left, #0f172a, #020617);
+        color: #e0e0e0;
+    }
+    .glass-card {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 15px;
+        padding: 20px;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        margin-bottom: 20px;
+    }
+    .floating-chatbot {
+        position: fixed;
+        bottom: 80px;
+        right: 30px;
+        width: 300px;
+        background: rgba(15, 23, 42, 0.95);
+        border-radius: 15px;
+        padding: 15px;
+        z-index: 10000;
+        border: 1px solid #00ffff;
+        box-shadow: 0 0 15px rgba(0,255,255,0.3);
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-# =============================================================================
-#  DARK MODE CSS
-#  NOTE: All HTML attribute values use double quotes "".
-#        CSS string values like font-family use single quotes inside
-#        the <style> block only — that is valid CSS, not Python strings.
-# =============================================================================
+# ----------------------------------------
+# SESSION MANAGEMENT
+# ----------------------------------------
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
 
-DARK_CSS = (
-    "<style>"
-    "@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700"
-    "&family=Inter:wght@300;400;500&display=swap');"
+if not st.session_state.authenticated:
+    st.title("🔐 Smart Attendance System Login")
+    username = st.text_input("Username")
+    pin = st.text_input("PIN", type="password")
+    
+    if st.button("Login"):
+        if username == "Raj" and pin == "RAJ1508":
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Invalid credentials. Try again.")
+    st.stop()
 
-    "html, body, [data-testid='stAppViewContainer'],"
-    "[data-testid='stHeader'], [data-testid='stToolbar'] {"
-    "    background-color: #0d1117 !important;"
-    "    color: #e6edf3 !important;"
-    "}"
-
-    "[data-testid='stSidebar'] {"
-    "    background: linear-gradient(180deg, #161b22 0%, #0d1117 100%) !important;"
-    "    border-right: 1px solid #30363d;"
-    "}"
-
-    ".portal-title {"
-    "    font-family: 'Rajdhani', sans-serif;"
-    "    font-size: 2.4rem;"
-    "    font-weight: 700;"
-    "    letter-spacing: 2px;"
-    "    background: linear-gradient(90deg, #58a6ff, #79c0ff, #56d364);"
-    "    -webkit-background-clip: text;"
-    "    -webkit-text-fill-color: transparent;"
-    "    margin-bottom: 0;"
-    "}"
-
-    ".portal-subtitle {"
-    "    font-family: 'Inter', sans-serif;"
-    "    font-size: 0.85rem;"
-    "    font-weight: 300;"
-    "    color: #8b949e;"
-    "    letter-spacing: 3px;"
-    "    text-transform: uppercase;"
-    "    margin-top: 2px;"
-    "}"
-
-    ".kpi-card {"
-    "    background: linear-gradient(135deg, #161b22 0%, #1c2128 100%);"
-    "    border: 1px solid #30363d;"
-    "    border-radius: 12px;"
-    "    padding: 24px 28px;"
-    "    text-align: center;"
-    "    box-shadow: 0 4px 24px rgba(0,0,0,0.4);"
-    "    transition: transform 0.2s ease, box-shadow 0.2s ease;"
-    "}"
-    ".kpi-card:hover {"
-    "    transform: translateY(-3px);"
-    "    box-shadow: 0 8px 32px rgba(88,166,255,0.15);"
-    "    border-color: #58a6ff;"
-    "}"
-    ".kpi-value {"
-    "    font-family: 'Rajdhani', sans-serif;"
-    "    font-size: 3.2rem;"
-    "    font-weight: 700;"
-    "    color: #58a6ff;"
-    "    line-height: 1;"
-    "}"
-    ".kpi-label {"
-    "    font-family: 'Inter', sans-serif;"
-    "    font-size: 0.78rem;"
-    "    font-weight: 500;"
-    "    letter-spacing: 2px;"
-    "    text-transform: uppercase;"
-    "    color: #8b949e;"
-    "    margin-top: 8px;"
-    "}"
-    ".kpi-icon { font-size: 1.6rem; margin-bottom: 8px; }"
-
-    ".section-header {"
-    "    font-family: 'Rajdhani', sans-serif;"
-    "    font-size: 1.1rem;"
-    "    font-weight: 600;"
-    "    letter-spacing: 2px;"
-    "    text-transform: uppercase;"
-    "    color: #8b949e;"
-    "    border-bottom: 1px solid #21262d;"
-    "    padding-bottom: 8px;"
-    "    margin: 24px 0 12px 0;"
-    "}"
-
-    ".status-online {"
-    "    display: inline-block;"
-    "    width: 8px; height: 8px;"
-    "    background: #56d364;"
-    "    border-radius: 50%;"
-    "    margin-right: 6px;"
-    "    box-shadow: 0 0 6px #56d364;"
-    "    animation: pulse 2s infinite;"
-    "}"
-    "@keyframes pulse {"
-    "    0%, 100% { opacity: 1; }"
-    "    50%       { opacity: 0.4; }"
-    "}"
-
-    "[data-testid='stDataFrame'] {"
-    "    border: 1px solid #21262d;"
-    "    border-radius: 8px;"
-    "    overflow: hidden;"
-    "}"
-
-    ".stButton > button {"
-    "    background: linear-gradient(135deg, #238636, #2ea043) !important;"
-    "    color: #ffffff !important;"
-    "    border: none !important;"
-    "    border-radius: 6px !important;"
-    "    font-family: 'Inter', sans-serif !important;"
-    "    font-weight: 500 !important;"
-    "    padding: 8px 20px !important;"
-    "    transition: opacity 0.2s !important;"
-    "}"
-    ".stButton > button:hover { opacity: 0.85 !important; }"
-
-    "[data-testid='stTextInput'] > div > input {"
-    "    background: #161b22 !important;"
-    "    color: #e6edf3 !important;"
-    "    border: 1px solid #30363d !important;"
-    "    border-radius: 6px !important;"
-    "}"
-
-    "hr { border-color: #21262d !important; }"
-
-    "::-webkit-scrollbar { width: 6px; }"
-    "::-webkit-scrollbar-track { background: #0d1117; }"
-    "::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }"
-    "</style>"
-)
-
-st.markdown(DARK_CSS, unsafe_allow_html=True)
-
-
-# =============================================================================
-#  FIREBASE — initialise once per session
-# =============================================================================
-
-@st.cache_resource(show_spinner=False)
-def init_firebase():
-    """Initialise Firebase Admin SDK and return the /logs reference."""
-    if not firebase_admin._apps:
-        cred = credentials.Certificate(SERVICE_ACCOUNT_PATH)
-        firebase_admin.initialize_app(cred, {"databaseURL": FIREBASE_DATABASE_URL})
-    return db.reference("/logs")
-
-
-# =============================================================================
-#  DATA HELPERS
-# =============================================================================
-
-def fetch_logs(logs_ref) -> pd.DataFrame:
-    """Fetch all records from /logs, map UIDs to names, return sorted DataFrame."""
-    raw = logs_ref.get()
-
-    if not raw:
-        return pd.DataFrame(columns=["Timestamp", "UID", "Student Name", "Date", "Time"])
-
-    rows = []
-    for key, entry in raw.items():
-        uid       = entry.get("uid", "N/A")
-        timestamp = entry.get("timestamp", "N/A")
-        name      = UID_TO_NAME.get(uid, "Unknown Guest")
-        rows.append({
-            "_key":       key,
-            "UID":        uid,
-            "Student Name": name,
-            "Timestamp":  timestamp,
+# ----------------------------------------
+# DATA LOADING
+# ----------------------------------------
+@st.cache_data(ttl=60)
+def load_data():
+    try:
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+        client = gspread.authorize(creds)
+        sheet = client.open("Student_Attendance_System").get_worksheet(1)
+        return pd.DataFrame(sheet.get_all_records())
+    except:
+        # Emergency Demo Data
+        return pd.DataFrame({
+            "Name": ["Atharva", "Shravani", "Janhavi", "Vaishnavi", "Anushka", "Aditi", "Raj", "Om", "Jaydip"],
+            "Status": ["Present", "Absent", "Present", "Present", "Absent", "Present", "Present", "Present", "Present"],
+            "Scan_Count": [5, 2, 6, 7, 3, 5, 4, 1, 6],
+            "Timestamp": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")] * 9
         })
 
-    df = pd.DataFrame(rows)
+st_autorefresh(interval=10000, key="datarefresh")
+data = load_data()
 
-    # Parse timestamp — handles ISO 8601 and most common formats automatically
-    df["_dt"] = pd.to_datetime(df["Timestamp"], errors="coerce")
-    df = df.sort_values("_dt", ascending=False)
-
-    df["Date"] = df["_dt"].dt.strftime("%d %b %Y").fillna("N/A")
-    df["Time"] = df["_dt"].dt.strftime("%I:%M:%S %p").fillna("N/A")
-
-    return df[["Timestamp", "UID", "Student Name", "Date", "Time"]]
-
-
-def compute_kpis(df: pd.DataFrame) -> Tuple[int, int]:
-    """Return (total_scans_today, unique_students_today)."""
-    today_str    = date.today().strftime("%d %b %Y")
-    today_df     = df[df["Date"] == today_str]
-    total_today  = len(today_df)
-    unique_today = today_df["UID"].nunique()
-    return total_today, unique_today
-
-
-# =============================================================================
-#  SIDEBAR
-# =============================================================================
-
+# ----------------------------------------
+# SIDEBAR
+# ----------------------------------------
 with st.sidebar:
+    st.markdown(f"### 🛡 Admin: {st.session_state.get('username', 'Raj')}")
+    st.success("System: **Online** 🟢")
+    st.divider()
+    view = st.radio("Choose View", ["📝 Students Record", "📍 College Location"])
+    if st.button("Logout"):
+        st.session_state.authenticated = False
+        st.rerun()
 
-    # Logo / branding block
-    logo_html = (
-        "<div style=\"text-align:center; padding:20px 0 10px 0;\">"
-        "<div style=\""
-        "width:80px; height:80px; margin:0 auto; border-radius:50%;"
-        "background:linear-gradient(135deg,#1f6feb,#388bfd);"
-        "display:flex; align-items:center; justify-content:center;"
-        "font-size:2rem; box-shadow:0 0 20px rgba(56,139,253,0.4);\">"
-        "&#127891;"
-        "</div>"
-        "<div style=\"font-family:'Rajdhani',sans-serif; font-size:1.1rem;"
-        "font-weight:700; color:#e6edf3; margin-top:10px; letter-spacing:1px;\">"
-        "JSPM NTC"
-        "</div>"
-        "<div style=\"font-family:'Inter',sans-serif; font-size:0.7rem;"
-        "color:#8b949e; letter-spacing:2px;\">"
-        "ATTENDANCE PORTAL"
-        "</div>"
-        "</div>"
-        "<hr/>"
-    )
-    st.markdown(logo_html, unsafe_allow_html=True)
+# ----------------------------------------
+# MAIN DASHBOARD
+# ----------------------------------------
+st.markdown(f"<h1 style='text-align:center; color:#00ffff;'>Computer Engineering Command Center</h1>", unsafe_allow_html=True)
 
-    st.markdown("### Controls")
-    refresh = st.button("Refresh Data", use_container_width=True)
+# Monitoring Hub (Friends word removed)
+st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+st.subheader("👥 Student Monitoring Hub")
 
-    st.markdown("<br/>", unsafe_allow_html=True)
+student_list = ["Atharva", "Shravani", "Janhavi", "Vaishnavi", "Anushka", "Aditi", "Raj", "Om", "Jaydip"]
+df_monitor = data[data["Name"].isin(student_list)]
+
+if not df_monitor.empty:
+    summary = df_monitor.groupby("Name").agg({"Status": "last", "Scan_Count": "sum"}).reset_index()
+    st.table(summary)
+else:
+    st.warning("No monitoring data available currently.")
+st.markdown("</div>", unsafe_allow_html=True)
+
+# KPI Metrics
+st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+col1, col2, col3 = st.columns(3)
+total_logs = len(data)
+active_count = df_monitor[df_monitor["Status"] == "Present"].shape[0]
+iot_health = "🟢 Optimal" if active_count > 4 else "🟡 Moderate"
+
+col1.metric("📊 Total Logs", total_logs)
+col2.metric("👥 Active Students", active_count)
+col3.metric("🤖 IoT Health", iot_health)
+st.markdown("</div>", unsafe_allow_html=True)
+
+# Area Chart
+st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+chart_data = data.copy()
+chart_data["Timestamp"] = pd.to_datetime(chart_data["Timestamp"], errors="coerce")
+chart_data = chart_data.groupby(chart_data["Timestamp"].dt.minute)["Name"].count().reset_index()
+chart_data.rename(columns={"Name": "Check-ins", "Timestamp": "Minute"}, inplace=True)
+fig = px.area(chart_data, x="Minute", y="Check-ins", template="plotly_dark", color_discrete_sequence=["#00ffff"])
+fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+st.plotly_chart(fig, width='stretch')
+st.markdown("</div>", unsafe_allow_html=True)
+
+# ----------------------------------------
+# SIDEBAR NAVIGATION LOGIC
+# ----------------------------------------
+if view == "📝 Students Record":
+    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+    st.dataframe(data, width='stretch')
+    st.markdown("</div>", unsafe_allow_html=True)
+elif view == "📍 College Location":
+    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+    st.map(pd.DataFrame({"lat": [18.4485], "lon": [73.8275]}))
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ----------------------------------------
+# FLOATING AI CHATBOT (Friends word removed)
+# ----------------------------------------
+query = st.chat_input("Ask your AI Assistant about attendance or location...")
+if query:
+    response = ""
+    query_lower = query.lower()
+
+    if "location" in query_lower or "college" in query_lower:
+        response = "📍 JSPM NTC is in Narhe, Pune (18.4485, 73.8275). It's a premier institute for Engineering."
+    else:
+        for name in student_list:
+            if name.lower() in query_lower:
+                record = df_monitor[df_monitor["Name"].str.contains(name, case=False, na=False)]
+                if not record.empty:
+                    status = record["Status"].iloc[-1]
+                    scans = record["Scan_Count"].iloc[-1]
+                    response = f"{name} is currently **{status}** with {scans} scans recorded."
+                else:
+                    response = f"No attendance record found for {name}."
+                break
+
+    if response == "":
+        response = "🤖 Sorry, I can answer only about Narhe campus or student attendance."
+    
+    st.markdown(f"""
+        <div class='floating-chatbot'>
+            <b style='color:#00ffff;'>🤖 AI Assistant:</b><br>
+            <span style='color:white;'>{response}</span>
+        </div>
+    """, unsafe_allow_html=True)afe_allow_html=True)
     st.markdown("### Filter by Date")
     date_filter = st.date_input("Select date", value=date.today())
 
