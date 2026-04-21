@@ -11,14 +11,14 @@ from streamlit_autorefresh import st_autorefresh
 # PAGE CONFIGURATION
 # ----------------------------------------
 st.set_page_config(
-    page_title="JSPM NTC - Smart Attendance",
+    page_title="Smart Attendance System",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # ----------------------------------------
-# CUSTOM UI: CYBERPUNK DARK THEME
+# CUSTOM UI: CYBERPUNK DARK THEME + GLASSMORPHISM
 # ----------------------------------------
 st.markdown("""
     <style>
@@ -39,7 +39,7 @@ st.markdown("""
         position: fixed;
         bottom: 80px;
         right: 30px;
-        width: 320px;
+        width: 300px;
         background: rgba(15, 23, 42, 0.95);
         border-radius: 15px;
         padding: 15px;
@@ -57,181 +57,22 @@ if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
-    st.title("🔐 Computer Engineering Dept. Login")
-    user_input = st.text_input("Admin Username")
-    pin_input = st.text_input("Security PIN", type="password")
+    st.title("🔐 Smart Attendance System Login")
+    username = st.text_input("Username")
+    pin = st.text_input("PIN", type="password")
     
-    if st.button("Access Command Center"):
-        if user_input == "Raj" and pin_input == "RAJ1508":
+    if st.button("Login"):
+        if username == "Raj" and pin == "RAJ1508":
             st.session_state.authenticated = True
-            st.session_state.username = "Raj Sathe"
             st.rerun()
         else:
-            st.error("Access Denied: Invalid Credentials.")
+            st.error("Invalid credentials. Try again.")
     st.stop()
 
 # ----------------------------------------
-# DATA LOADING (Google Sheets)
+# DATA LOADING
 # ----------------------------------------
-@st.cache_data(ttl=10)
-def load_data():
-    try:
-        # Update with your actual credentials.json file path
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
-        client = gspread.authorize(creds)
-        
-        # Replace with your exact Google Sheet Name
-        sheet = client.open("Student_Attendance_System").get_worksheet(1)
-        return pd.DataFrame(sheet.get_all_records())
-    except Exception as e:
-        # Emergency Demo Data for Presentation
-        return pd.DataFrame({
-            "Name": ["Atharva", "Shravani", "Janhavi", "Vaishnavi", "Anushka", "Aditi", "Raj", "Om", "Jaydip"],
-            "Status": ["Present", "Absent", "Present", "Present", "Absent", "Present", "Present", "Present", "Present"],
-            "Scan_Count": [5, 2, 6, 7, 3, 5, 4, 1, 6],
-            "Timestamp": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")] * 9
-        })
-
-# Auto-refresh every 10 seconds
-st_autorefresh(interval=10000, key="datarefresh")
-data = load_data()
-
-# ----------------------------------------
-# SIDEBAR
-# ----------------------------------------
-with st.sidebar:
-    st.markdown(f"### 🛡 Admin: {st.session_state.username}")
-    st.success("IoT Node: **Connected** 🟢")
-    st.divider()
-    view = st.radio("Navigation", ["📊 Dashboard Hub", "📝 Raw Records", "📍 Campus Map"])
-    
-    if st.button("Secure Logout"):
-        st.session_state.authenticated = False
-        st.rerun()
-
-# ----------------------------------------
-# MAIN INTERFACE
-# ----------------------------------------
-st.markdown("<h1 style='text-align:center; color:#00ffff;'>JSPM NTC: Smart Attendance System</h1>", unsafe_allow_html=True)
-
-if view == "📊 Dashboard Hub":
-    # 1. Monitoring Hub
-    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-    st.subheader("👥 Live Student Monitoring")
-    student_list = ["Atharva", "Shravani", "Janhavi", "Vaishnavi", "Anushka", "Aditi", "Raj", "Om", "Jaydip"]
-    df_monitor = data[data["Name"].isin(student_list)]
-    
-    if not df_monitor.empty:
-        summary = df_monitor.groupby("Name").agg({"Status": "last", "Scan_Count": "sum"}).reset_index()
-        st.dataframe(summary, use_container_width=True, hide_index=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # 2. KPI Metrics
-    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-    m1, m2, m3 = st.columns(3)
-    active_now = df_monitor[df_monitor["Status"] == "Present"].shape[0]
-    
-    m1.metric("Total Logs", len(data))
-    m2.metric("Active Students", active_now)
-    m3.metric("System Health", "Optimal" if active_now > 4 else "Testing")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # 3. Trends Chart
-    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-    st.subheader("📈 Attendance Flow (Real-time)")
-    chart_df = data.copy()
-    chart_df["Timestamp"] = pd.to_datetime(chart_df["Timestamp"], errors='coerce')
-    chart_df = chart_df.dropna(subset=['Timestamp'])
-    chart_df = chart_df.groupby(chart_df["Timestamp"].dt.minute)["Name"].count().reset_index()
-    
-    fig = px.area(chart_df, x="Timestamp", y="Name", template="plotly_dark", color_discrete_sequence=["#00ffff"])
-    fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-    st.plotly_chart(fig, use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-elif view == "📝 Raw Records":
-    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-    st.subheader("Full Attendance Log")
-    st.dataframe(data, use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-elif view == "📍 Campus Map":
-    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-    st.subheader("JSPM Narhe Technical Campus")
-    # Coordinates for Narhe, Pune
-    map_data = pd.DataFrame({"lat": [18.4485], "lon": [73.8275]})
-    st.map(map_data)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# ----------------------------------------
-# FLOATING AI CHATBOT
-# ----------------------------------------
-query = st.chat_input("Ask about attendance or JSPM location...")
-if query:
-    response = "🤖 Sorry, I only provide data regarding the Narhe campus or current attendance."
-    q = query.lower()
-
-    if any(word in q for word in ["location", "where", "college", "campus"]):
-        response = "📍 **JSPM NTC** is located in Narhe, Pune. It serves as our main technical hub."
-    else:
-        for name in student_list:
-            if name.lower() in q:
-                record = df_monitor[df_monitor["Name"].str.contains(name, case=False, na=False)]
-                if not record.empty:
-                    status = record["Status"].iloc[-1]
-                    scans = record["Scan_Count"].iloc[-1]
-                    response = f"**{name}** is currently **{status}** with {scans} scans."
-                break
-
-    st.markdown(f"""
-        <div class='floating-chatbot'>
-            <b style='color:#00ffff;'>AI Assistant:</b><br>
-            <span style='color:white;'>{response}</span>
-        </div>
-    """, unsafe_allow_html=True)
-    .glass-card {
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 15px;
-        padding: 25px;
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        margin-bottom: 20px;
-        width: 100%; 
-    }
-    .floating-chatbot {
-        position: fixed;
-        bottom: 30px;
-        right: 30px;
-        width: 320px;
-        background: rgba(15, 23, 42, 0.95);
-        border-radius: 15px;
-        padding: 15px;
-        z-index: 10000;
-        border: 1px solid #00ffff;
-        box-shadow: 0 0 15px rgba(0,255,255,0.3);
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# ----------------------------------------
-# 3. SESSION & DATA (Unchanged)
-# ----------------------------------------
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-
-if not st.session_state.authenticated:
-    st.title("🔐 Computer Engineering Login")
-    user_input = st.text_input("Username")
-    pin_input = st.text_input("PIN", type="password")
-    if st.button("Enter"):
-        if user_input == "Raj" and pin_input == "RAJ1508":
-            st.session_state.authenticated = True
-            st.session_state.username = "Raj Sathe"
-            st.rerun()
-    st.stop()
-
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=60)
 def load_data():
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -240,6 +81,7 @@ def load_data():
         sheet = client.open("Student_Attendance_System").get_worksheet(1)
         return pd.DataFrame(sheet.get_all_records())
     except:
+        # Emergency Demo Data
         return pd.DataFrame({
             "Name": ["Atharva", "Shravani", "Janhavi", "Vaishnavi", "Anushka", "Aditi", "Raj", "Om", "Jaydip"],
             "Status": ["Present", "Absent", "Present", "Present", "Absent", "Present", "Present", "Present", "Present"],
@@ -251,17 +93,102 @@ st_autorefresh(interval=10000, key="datarefresh")
 data = load_data()
 
 # ----------------------------------------
-# 4. LIQUID NAVIGATION
+# SIDEBAR
 # ----------------------------------------
 with st.sidebar:
-    st.markdown(f"### 🛡 Admin: {st.session_state.username}")
+    st.markdown(f"### 🛡 Admin: {st.session_state.get('username', 'Raj')}")
     st.success("System: **Online** 🟢")
-    view = st.radio("Navigation", ["📊 Dashboard", "📝 Records", "📍 Map"])
+    st.divider()
+    view = st.radio("Choose View", ["📝 Students Record", "📍 College Location"])
     if st.button("Logout"):
         st.session_state.authenticated = False
         st.rerun()
 
-st.markdown("<h1 style='text-align:center; color:#00ffff;'>Command Center</h1>", unsafe_allow_html=True)
+# ----------------------------------------
+# MAIN DASHBOARD
+# ----------------------------------------
+st.markdown(f"<h1 style='text-align:center; color:#00ffff;'>Computer Engineering Command Center</h1>", unsafe_allow_html=True)
+
+# Monitoring Hub (Friends word removed)
+st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+st.subheader("👥 Student Monitoring Hub")
+
+student_list = ["Atharva", "Shravani", "Janhavi", "Vaishnavi", "Anushka", "Aditi", "Raj", "Om", "Jaydip"]
+df_monitor = data[data["Name"].isin(student_list)]
+
+if not df_monitor.empty:
+    summary = df_monitor.groupby("Name").agg({"Status": "last", "Scan_Count": "sum"}).reset_index()
+    st.table(summary)
+else:
+    st.warning("No monitoring data available currently.")
+st.markdown("</div>", unsafe_allow_html=True)
+
+# KPI Metrics
+st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+col1, col2, col3 = st.columns(3)
+total_logs = len(data)
+active_count = df_monitor[df_monitor["Status"] == "Present"].shape[0]
+iot_health = "🟢 Optimal" if active_count > 4 else "🟡 Moderate"
+
+col1.metric("📊 Total Logs", total_logs)
+col2.metric("👥 Active Students", active_count)
+col3.metric("🤖 IoT Health", iot_health)
+st.markdown("</div>", unsafe_allow_html=True)
+
+# Area Chart
+st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+chart_data = data.copy()
+chart_data["Timestamp"] = pd.to_datetime(chart_data["Timestamp"], errors="coerce")
+chart_data = chart_data.groupby(chart_data["Timestamp"].dt.minute)["Name"].count().reset_index()
+chart_data.rename(columns={"Name": "Check-ins", "Timestamp": "Minute"}, inplace=True)
+fig = px.area(chart_data, x="Minute", y="Check-ins", template="plotly_dark", color_discrete_sequence=["#00ffff"])
+fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+st.plotly_chart(fig, width='stretch')
+st.markdown("</div>", unsafe_allow_html=True)
+
+# ----------------------------------------
+# SIDEBAR NAVIGATION LOGIC
+# ----------------------------------------
+if view == "📝 Students Record":
+    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+    st.dataframe(data, width='stretch')
+    st.markdown("</div>", unsafe_allow_html=True)
+elif view == "📍 College Location":
+    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+    st.map(pd.DataFrame({"lat": [18.4485], "lon": [73.8275]}))
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ----------------------------------------
+# FLOATING AI CHATBOT (Friends word removed)
+# ----------------------------------------
+query = st.chat_input("Ask your AI Assistant about attendance or location...")
+if query:
+    response = ""
+    query_lower = query.lower()
+
+    if "location" in query_lower or "college" in query_lower:
+        response = "📍 JSPM NTC is in Narhe, Pune (18.4485, 73.8275). It's a premier institute for Engineering."
+    else:
+        for name in student_list:
+            if name.lower() in query_lower:
+                record = df_monitor[df_monitor["Name"].str.contains(name, case=False, na=False)]
+                if not record.empty:
+                    status = record["Status"].iloc[-1]
+                    scans = record["Scan_Count"].iloc[-1]
+                    response = f"{name} is currently **{status}** with {scans} scans recorded."
+                else:
+                    response = f"No attendance record found for {name}."
+                break
+
+    if response == "":
+        response = "🤖 Sorry, I can answer only about Narhe campus or student attendance."
+    
+    st.markdown(f"""
+        <div class='floating-chatbot'>
+            <b style='color:#00ffff;'>🤖 AI Assistant:</b><br>
+            <span style='color:white;'>{response}</span>
+        </div>
+    """, unsafe_allow_html=True)st.markdown("<h1 style='text-align:center; color:#00ffff;'>Command Center</h1>", unsafe_allow_html=True)
 
 # ----------------------------------------
 # 5. LIQUID DASHBOARD ELEMENTS
