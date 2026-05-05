@@ -41,6 +41,14 @@ st.markdown("""
         background: rgba(15, 23, 42, 0.95); border-radius: 1rem; padding: 1.2rem;
         z-index: 1000; border: 1px solid #00ffff;
     }
+    /* ADDED: Scrolling Marquee for Live Alerts */
+    .marquee {
+        width: 100%; overflow: hidden; white-space: nowrap;
+        background: rgba(0, 255, 255, 0.1); color: #00ffff;
+        padding: 5px 0; border-radius: 5px; margin-bottom: 10px;
+    }
+    .marquee span { display: inline-block; animation: scroll 20s linear infinite; }
+    @keyframes scroll { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
     </style>
 """, unsafe_allow_html=True)
 
@@ -122,6 +130,9 @@ with st.sidebar:
 # ----------------------------------------
 # MAIN CONTENT
 # ----------------------------------------
+# ADDED: Live Alert Marquee
+st.markdown(f"<div class='marquee'><span>⚠️ SYSTEM ALERT: Currently monitoring {get_current_session()} | IoT Nodes: Online | Last Sync: {datetime.now().strftime('%H:%M:%S')}</span></div>", unsafe_allow_html=True)
+
 st.markdown("<h1 style='text-align:center; color:#00ffff; letter-spacing: 2px;'>SMART ATTENDANCE COMMAND CENTER</h1>", unsafe_allow_html=True)
 
 total_reg = data["Name"].nunique()
@@ -134,7 +145,21 @@ if view == "Overview":
     with col3: st.markdown(f"<div class='glass-card'><small>Attendance %</small><h2>{(curr_pres/total_reg*100):.1f}%</h2></div>", unsafe_allow_html=True)
     with col4: st.markdown(f"<div class='glass-card'><small>IoT Node</small><h2 style='color:#22c55e;'>Active 🟢</h2></div>", unsafe_allow_html=True)
 
+    # ADDED: Attendance Peak Analytics Chart
     st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+    st.subheader("📈 Attendance Activity Peak")
+    c_data = data.copy()
+    c_data["Timestamp"] = pd.to_datetime(c_data["Timestamp"], errors='coerce')
+    c_data = c_data.dropna(subset=['Timestamp'])
+    if not c_data.empty:
+        c_data = c_data.set_index("Timestamp").resample('h').count().reset_index()
+        fig = px.area(c_data, x="Timestamp", y="Name", template="plotly_dark", color_discrete_sequence=["#00ffff"])
+        fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis_title="Time", yaxis_title="Total Scans")
+        st.plotly_chart(fig, width='stretch')
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+    st.subheader("👥 Live Student Status")
     display_df = data.drop_duplicates(subset="Name", keep="last").copy()
     display_df.index = range(1, len(display_df) + 1)
     st.dataframe(display_df, width='stretch')
@@ -163,19 +188,22 @@ elif view == "Campus Map":
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ----------------------------------------
-# AI CHATBOT (FIXED)
+# AI CHATBOT (FIXED & IMPROVED)
 # ----------------------------------------
 query = st.chat_input("Ask about students, counts, or the project...")
 if query:
-    response = ""  # Fixed: Initialize before use
+    response = "" 
     q = query.lower()
     session = get_current_session()
     
+    # ADDED: Detailed Q&A Logic
     if "how many" in q or "count" in q or "present" in q:
-        response = f"🤖 There are currently **{curr_pres}** students present out of **{total_reg}** registered students."
-    elif "how it works" in q:
-        response = "🤖 This system uses IoT nodes to scan student IDs, logs data to Google Sheets, and visualizes it in real-time using Streamlit."
-    elif "current" in q or "lecture" in q:
+        response = f"🤖 There are currently **{curr_pres}** students present out of **{total_reg}** total registered students."
+    elif "how it works" in q or "technology" in q:
+        response = "🤖 This system uses ESP32 IoT nodes with RFID scanners. Data is pushed to Google Sheets and visualized here on this Streamlit liquid dashboard."
+    elif "location" in q or "college" in q:
+        response = "🤖 JSPM's Narhe Technical Campus is in Narhe, Pune. Current monitoring is for Division A students[cite: 1]."
+    elif "current" in q or "lecture" in q or "session" in q:
         response = f"🤖 The current session is: **{session}**."
     else:
         for name in data["Name"].unique():
@@ -185,6 +213,6 @@ if query:
                 break
     
     if not response: 
-        response = "🤖 I'm here to help! Try asking 'How many students are present?' or check a name."
+        response = "🤖 I'm here to help! Try asking 'How many students are present?' or 'How does this work?'."
 
     st.markdown(f"<div class='floating-chatbot'><b style='color:#00ffff;'>AI Assistant:</b><br>{response}</div>", unsafe_allow_html=True)
